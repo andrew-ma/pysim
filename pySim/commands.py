@@ -21,7 +21,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-from pySim.utils import rpad, b2h
+from pySim.utils import rpad, b2h, sw_match
+from pySim.exceptions import SwMatchError
 
 class SimCardCommands(object):
 	def __init__(self, transport):
@@ -219,9 +220,47 @@ class SimCardCommands(object):
 	def reset_card(self):
 		return self._tp.reset_card()
 
-	def verify_chv(self, chv_no, code):
-		fc = rpad(b2h(code), 16)
+	def verify_chv(self, chv_no, pin_code):
+		fc = rpad(b2h(pin_code), 16)
 		data, sw = self._tp.send_apdu(self.cla_byte + '2000' + ('%02X' % chv_no) + '08' + fc)
-		if (sw != '9000'):
-			raise RuntimeError('Failed to authenticate with ADM key %s, %i tries left.' % (code, int(sw[3])))
+		if sw_match(sw, '63cx'):
+			raise RuntimeError('Failed to authenticate chv_no 0x%02X with code 0x%s, %i tries left.' % (chv_no, b2h(pin_code).upper(), int(sw[3])))
+		elif (sw != '9000'):
+			raise SwMatchError(sw, '9000')
+		return (data,sw)
+
+	def unblock_chv(self, chv_no, puk_code, pin_code):
+		fc = rpad(b2h(puk_code), 16) + rpad(b2h(pin_code), 16)
+		data, sw = self._tp.send_apdu(self.cla_byte + '2C00' + ('%02X' % chv_no) + '10' + fc)
+		if sw_match(sw, '63cx'):
+			raise RuntimeError('Failed to unblock chv_no 0x%02X with code 0x%s, %i tries left.' % (chv_no, b2h(puk_code).upper(), int(sw[3])))
+		elif (sw != '9000'):
+			raise SwMatchError(sw, '9000')
+		return (data,sw)
+
+	def change_chv(self, chv_no, pin_code, new_pin_code):
+		fc = rpad(b2h(pin_code), 16) + rpad(b2h(new_pin_code), 16)
+		data, sw = self._tp.send_apdu(self.cla_byte + '2400' + ('%02X' % chv_no) + '10' + fc)
+		if sw_match(sw, '63cx'):
+			raise RuntimeError('Failed to change chv_no 0x%02X with code 0x%s, %i tries left.' % (chv_no, b2h(pin_code).upper(), int(sw[3])))
+		elif (sw != '9000'):
+			raise SwMatchError(sw, '9000')
+		return (data,sw)
+
+	def disable_chv(self, chv_no, pin_code):
+		fc = rpad(b2h(pin_code), 16)
+		data, sw = self._tp.send_apdu(self.cla_byte + '2600' + ('%02X' % chv_no) + '08' + fc)
+		if sw_match(sw, '63cx'):
+			raise RuntimeError('Failed to disable chv_no 0x%02X with code 0x%s, %i tries left.' % (chv_no, b2h(pin_code).upper(), int(sw[3])))
+		elif (sw != '9000'):
+			raise SwMatchError(sw, '9000')
+		return (data,sw)
+
+	def enable_chv(self, chv_no, pin_code):
+		fc = rpad(b2h(pin_code), 16)
+		data, sw = self._tp.send_apdu(self.cla_byte + '2800' + ('%02X' % chv_no) + '08' + fc)
+		if sw_match(sw, '63cx'):
+			raise RuntimeError('Failed to enable chv_no 0x%02X with code 0x%s, %i tries left.' % (chv_no, b2h(pin_code).upper(), int(sw[3])))
+		elif (sw != '9000'):
+			raise SwMatchError(sw, '9000')
 		return (data,sw)
