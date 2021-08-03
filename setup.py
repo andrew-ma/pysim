@@ -1,8 +1,8 @@
 from setuptools import setup
 
 setup(
-    name='pySim',
-    version='1.0',
+    name='pysimcard',
+    version='1.0.3',
     packages=['pySim', 'pySim.transport'],
     url='https://osmocom.org/projects/pysim/wiki',
     license='GPLv2',
