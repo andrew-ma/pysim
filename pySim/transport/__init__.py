@@ -136,6 +136,10 @@ class LinkBase(abc.ABC):
 		"""
 		rv = self.send_apdu(pdu)
 
+		if sw == '9000' and sw_match(rv[1], '91xx'):
+			# proactive sim as per TS 102 221 Setion 7.4.2
+			rv = self.send_apdu_checksw('80120000' + rv[1][2:], sw)
+			print("FETCH: %s", rv[0])
 		if not sw_match(rv[1], sw):
 			raise SwMatchError(rv[1], sw.lower(), self.sw_interpreter)
 		return rv
@@ -234,5 +238,8 @@ def init_reader(opts, **kwargs) -> Optional[LinkBase]:
 			sl = SerialSimLink(device=opts.device, baudrate=opts.baudrate, **kwargs)
 		return sl
 	except Exception as e:
-		print("Card reader initialization failed with exception:\n" + str(e))
+		if str(e):
+			print("Card reader initialization failed with exception:\n" + str(e))
+		else:
+			print("Card reader initialization failed with an exception of type:\n" + str(type(e)))
 		return None

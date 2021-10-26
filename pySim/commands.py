@@ -23,7 +23,7 @@
 
 from construct import *
 from pySim.construct import LV
-from pySim.utils import rpad, b2h, h2b, sw_match, bertlv_encode_len
+from pySim.utils import rpad, b2h, h2b, sw_match, bertlv_encode_len, Hexstr, h2i
 from pySim.exceptions import SwMatchError
 
 class SimCardCommands(object):
@@ -141,13 +141,14 @@ class SimCardCommands(object):
 		if length is None:
 			length = self.__len(r) - offset
 		total_data = ''
-		while offset < length:
-			chunk_len = min(255, length-offset)
-			pdu = self.cla_byte + 'b0%04x%02x' % (offset, chunk_len)
+		chunk_offset = 0
+		while chunk_offset < length:
+			chunk_len = min(255, length-chunk_offset)
+			pdu = self.cla_byte + 'b0%04x%02x' % (offset + chunk_offset, chunk_len)
 			data,sw = self._tp.send_apdu(pdu)
 			if sw == '9000':
 				total_data += data
-				offset += chunk_len
+				chunk_offset += chunk_len
 			else:
 				raise ValueError('Failed to read (offset %d)' % (offset))
 		return total_data, sw
@@ -172,11 +173,11 @@ class SimCardCommands(object):
 		self.select_path(ef)
 		total_data = ''
 		total_sw = "9000"
-		chunk_offset = offset
+		chunk_offset = 0
 		while chunk_offset < data_length:
 			chunk_len = min(255, data_length - chunk_offset)
 			# chunk_offset is bytes, but data slicing is hex chars, so we need to multiply by 2
-			pdu = self.cla_byte + 'd6%04x%02x' % (chunk_offset, chunk_len) + data[chunk_offset*2 : (chunk_offset+chunk_len)*2]
+			pdu = self.cla_byte + 'd6%04x%02x' % (offset + chunk_offset, chunk_len) + data[chunk_offset*2 : (chunk_offset+chunk_len)*2]
 			chunk_data, chunk_sw = self._tp.send_apdu(pdu)
 			if chunk_sw == total_sw:
 				total_data += chunk_data
@@ -441,3 +442,45 @@ class SimCardCommands(object):
 	def envelope(self, payload:str):
 		"""Send one ENVELOPE command to the SIM"""
 		return self._tp.send_apdu_checksw('80c20000%02x%s' % (len(payload)//2, payload))
+
+	def terminal_profile(self, payload:str):
+		"""Send TERMINAL PROFILE to card"""
+		data_length = len(payload) // 2
+		data, sw = self._tp.send_apdu(('80100000%02x' % data_length) + payload)
+		return (data, sw)
+
+	# ETSI TS 102 221 11.1.22
+	def suspend_uicc(self, min_len_secs:int=60, max_len_secs:int=43200):
+		"""Send SUSPEND UICC to the card."""
+		def encode_duration(secs:int) -> Hexstr:
+			if secs >= 10*24*60*60:
+				return '04%02x' % (secs // (10*24*60*60))
+			elif secs >= 24*60*60:
+				return '03%02x' % (secs // (24*60*60))
+			elif secs >= 60*60:
+				return '02%02x' % (secs // (60*60))
+			elif secs >= 60:
+				return '01%02x' % (secs // 60)
+			else:
+				return '00%02x' % secs
+		def decode_duration(enc:Hexstr) -> int:
+			time_unit = enc[:2]
+			length = h2i(enc[2:4])
+			if time_unit == '04':
+				return length * 10*24*60*60
+			elif time_unit == '03':
+				return length * 24*60*60
+			elif time_unit == '02':
+				return length * 60*60
+			elif time_unit == '01':
+				return length * 60
+			elif time_unit == '00':
+				return length
+			else:
+				raise ValueError('Time unit must be 0x00..0x04')
+		min_dur_enc = encode_duration(min_len_secs)
+		max_dur_enc = encode_duration(max_len_secs)
+		data, sw = self._tp.send_apdu_checksw('8076000004' + min_dur_enc + max_dur_enc)
+		negotiated_duration_secs = decode_duration(data[:4])
+		resume_token = data[4:]
+		return (negotiated_duration_secs, resume_token, sw)

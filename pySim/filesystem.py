@@ -27,6 +27,8 @@ not the actual contents / runtime state of interacting with a given smart card.
 import code
 import tempfile
 import json
+import abc
+import inspect
 
 import cmd2
 from cmd2 import CommandSet, with_default_category, with_argparser
@@ -34,10 +36,13 @@ import argparse
 
 from typing import cast, Optional, Iterable, List, Any, Dict, Tuple
 
+from smartcard.util import toBytes
+
 from pySim.utils import sw_match, h2b, b2h, i2h, is_hex, auto_int, bertlv_parse_one, Hexstr
 from pySim.construct import filter_dict, parse_construct
 from pySim.exceptions import *
 from pySim.jsonpath import js_path_find, js_path_modify
+from pySim.commands import SimCardCommands
 
 class CardFile(object):
     """Base class for all objects in the smart card filesystem.
@@ -546,7 +551,7 @@ class TransparentEF(CardEF):
         elif self._tlv:
             self._tlv.from_dict(abstract_data)
             return self._tlv.to_tlv()
-        raise NotImplementedError
+        raise NotImplementedError("%s encoder not yet implemented. Patches welcome." % self)
 
     def encode_hex(self, abstract_data:dict) -> str:
         """Encode abstract representation into raw (hex string) data.
@@ -572,7 +577,7 @@ class TransparentEF(CardEF):
         elif self._tlv:
             self._tlv.from_dict(abstract_data)
             return b2h(self._tlv.to_tlv())
-        raise NotImplementedError
+        raise NotImplementedError("%s encoder not yet implemented. Patches welcome." % self)
 
 
 class LinFixedEF(CardEF):
@@ -782,7 +787,7 @@ class LinFixedEF(CardEF):
         elif self._tlv:
             self._tlv.from_dict(abstract_data)
             return b2h(self._tlv.to_tlv())
-        raise NotImplementedError
+        raise NotImplementedError("%s encoder not yet implemented. Patches welcome." % self)
 
     def encode_record_bin(self, abstract_data:dict) -> bytearray:
         """Encode abstract representation into raw (binary) data.
@@ -807,7 +812,7 @@ class LinFixedEF(CardEF):
         elif self._tlv:
             self._tlv.from_dict(abstract_data)
             return self._tlv.to_tlv()
-        raise NotImplementedError
+        raise NotImplementedError("%s encoder not yet implemented. Patches welcome." % self)
 
 class CyclicEF(LinFixedEF):
     """Cyclic EF (Entry File) in the smart card filesystem"""
@@ -915,7 +920,7 @@ class TransRecEF(TransparentEF):
         elif self._tlv:
             self._tlv.from_dict(abstract_data)
             return b2h(self._tlv.to_tlv())
-        raise NotImplementedError
+        raise NotImplementedError("%s encoder not yet implemented. Patches welcome." % self)
 
     def encode_record_bin(self, abstract_data:dict) -> bytearray:
         """Encode abstract representation into raw (binary) data.
@@ -940,7 +945,7 @@ class TransRecEF(TransparentEF):
         elif self._tlv:
             self._tlv.from_dict(abstract_data)
             return self._tlv.to_tlv()
-        raise NotImplementedError
+        raise NotImplementedError("%s encoder not yet implemented. Patches welcome." % self)
 
     def _decode_bin(self, raw_bin_data:bytearray):
         chunks = [raw_bin_data[i:i+self.rec_len] for i in range(0, len(raw_bin_data), self.rec_len)]
@@ -1324,6 +1329,11 @@ class RuntimeState(object):
             raise TypeError("Only works with BER-TLV EF")
         return self.card._scc.set_data(self.selected_file.fid, tag, data_hex, conserve=self.conserve_write)
 
+    def unregister_cmds(self, cmd_app=None):
+        """Unregister all file specific commands."""
+        if cmd_app and self.selected_file.shell_commands:
+            for c in self.selected_file.shell_commands:
+                cmd_app.unregister_command_set(c)
 
 
 
@@ -1427,3 +1437,35 @@ class CardProfile(object):
             Tuple of two strings
         """
         return interpret_sw(self.sw, sw)
+
+
+class CardModel(abc.ABC):
+    """A specific card model, typically having some additional vendor-specific files. All
+    you need to do is to define a sub-class with a list of ATRs or an overridden match
+    method."""
+    _atrs = []
+
+    @classmethod
+    @abc.abstractmethod
+    def add_files(cls, rs:RuntimeState):
+        """Add model specific files to given RuntimeState."""
+
+    @classmethod
+    def match(cls, scc:SimCardCommands) -> bool:
+        """Test if given card matches this model."""
+        card_atr = scc.get_atr()
+        for atr in cls._atrs:
+            atr_bin = toBytes(atr)
+            if atr_bin == card_atr:
+                print("Detected CardModel:", cls.__name__)
+                return True
+        return False
+
+    @staticmethod
+    def apply_matching_models(scc:SimCardCommands, rs:RuntimeState):
+        """Check if any of the CardModel sub-classes 'match' the currently inserted card
+        (by ATR or overriding the 'match' method). If so, call their 'add_files'
+        method."""
+        for m in CardModel.__subclasses__():
+            if m.match(scc):
+                m.add_files(rs)

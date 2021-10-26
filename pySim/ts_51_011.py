@@ -505,6 +505,12 @@ class EF_ServiceTable(TransparentEF):
     def __init__(self, fid, sfid, name, desc, size, table):
         super().__init__(fid, sfid=sfid, name=name, desc=desc, size=size)
         self.table = table
+    @staticmethod
+    def _bit_byte_offset_for_service(service:int) -> (int, int):
+        i = service - 1
+        byte_offset = i//4
+        bit_offset = (i % 4) * 2
+        return (byte_offset, bit_offset)
     def _decode_bin(self, raw_bin):
         ret = {}
         for i in range(0, len(raw_bin)*4):
@@ -513,12 +519,31 @@ class EF_ServiceTable(TransparentEF):
             bit_offset = (i % 4) * 2
             bits = (byte >> bit_offset) & 3
             ret[service_nr] = {
-                     'description': self.table[service_nr] or None,
+                     'description': self.table[service_nr] if service_nr in self.table else None,
                      'allocated': True if bits & 1 else False,
                      'activated': True if bits & 2 else False,
                      }
         return ret
-    # TODO: encoder
+    def _encode_bin(self, in_json):
+        # compute the required binary size
+        bin_len = 0
+        for srv in in_json.keys():
+            service_nr = int(srv)
+            (byte_offset, bit_offset) = EF_ServiceTable._bit_byte_offset_for_service(service_nr)
+            if byte_offset >= bin_len:
+                bin_len = byte_offset+1
+        # encode the actual data
+        out = bytearray(b'\x00' * bin_len)
+        for srv in in_json.keys():
+            service_nr = int(srv)
+            (byte_offset, bit_offset) = EF_ServiceTable._bit_byte_offset_for_service(service_nr)
+            bits = 0
+            if in_json[srv]['allocated'] == True:
+                bits |= 1
+            if in_json[srv]['activated'] == True:
+                bits |= 2
+            out[byte_offset] |= ((bits & 3) << bit_offset)
+        return out
 
 # TS 51.011 Section 10.3.11
 class EF_SPN(TransparentEF):
@@ -937,9 +962,9 @@ def decode_select_response(resp_hex):
     file_type = type_of_file_map[resp_bin[6]] if resp_bin[6] in type_of_file_map else resp_bin[6]
     ret['file_descriptor']['file_type'] = file_type
     if file_type in ['mf', 'df']:
-        ret['file_characteristics'] = b2h(resp_bin[13])
-        ret['num_direct_child_df'] = int(resp_bin[14], 16)
-        ret['num_direct_child_ef'] = int(resp_bin[15], 16)
+        ret['file_characteristics'] = b2h(resp_bin[13:14])
+        ret['num_direct_child_df'] = resp_bin[14]
+        ret['num_direct_child_ef'] = resp_bin[15]
         ret['num_chv_unblock_adm_codes'] = int(resp_bin[16])
         # CHV / UNBLOCK CHV stats
     elif file_type in ['working_ef']:

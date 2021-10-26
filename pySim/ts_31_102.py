@@ -1084,6 +1084,24 @@ class ADF_USIM(CardADF):
             (data, sw) = self._cmd.card._scc.authenticate(opts.rand, opts.autn)
             self._cmd.poutput_json(data)
 
+        def do_terminal_profile(self, arg):
+            """Send a TERMINAL PROFILE command to the card."""
+            (data, sw) = self._cmd.card._scc.terminal_profile(arg)
+            self._cmd.poutput('SW: %s, data: %s' % (sw, data))
+
+        def do_envelope(self, arg):
+            """Send an ENVELOPE command to the card."""
+            (data, sw) = self._cmd.card._scc.envelope(arg)
+            self._cmd.poutput('SW: %s, data: %s' % (sw, data))
+
+        def do_envelope_sms(self, arg):
+            """Send an ENVELOPE command to the card."""
+            tpdu_ie = SMS_TPDU()
+            tpdu_ie.from_bytes(h2b(arg))
+            dev_ids = DeviceIdentities(decoded={'source_dev_id':'network','dest_dev_id':'uicc'})
+            sms_dl = SMSPPDownload(children=[dev_ids, tpdu_ie])
+            (data, sw) = self._cmd.card._scc.envelope(b2h(sms_dl.to_tlv()))
+            self._cmd.poutput('SW: %s, data: %s' % (sw, data))
 
 
 # TS 31.102 Section 7.3
@@ -1097,4 +1115,6 @@ sw_usim = {
     }
 }
 
-CardApplicationUSIM = CardApplication('USIM', adf=ADF_USIM(), sw=sw_usim)
+class CardApplicationUSIM(CardApplication):
+    def __init__(self):
+	    super().__init__('USIM', adf=ADF_USIM(), sw=sw_usim)

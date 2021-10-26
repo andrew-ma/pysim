@@ -1123,8 +1123,25 @@ class FairwavesSIM(UsimCard):
 		data, sw = self._scc.update_binary(self._EF['OP/OPC'], content)
 		return sw
 
-
 	def program(self, p):
+		# For some reason the card programming only works when the card
+		# is handled as a classic SIM, even though it is an USIM, so we
+		# reconfigure the class byte and the select control field on
+		# the fly. When the programming is done the original values are
+		# restored.
+		cla_byte_orig = self._scc.cla_byte
+		sel_ctrl_orig = self._scc.sel_ctrl
+		self._scc.cla_byte = "a0"
+		self._scc.sel_ctrl = "0000"
+
+		try:
+			self._program(p)
+		finally:
+			# restore original cla byte and sel ctrl
+			self._scc.cla_byte = cla_byte_orig
+			self._scc.sel_ctrl = sel_ctrl_orig
+
+	def _program(self, p):
 		# authenticate as ADM1
 		if not p['pin_adm']:
 			raise ValueError("Please provide a PIN-ADM as there is no default one")
@@ -1542,20 +1559,12 @@ _cards_classes = [ FakeMagicSim, SuperSim, MagicSim, GrcardSim,
 		   SysmoSIMgr1, SysmoSIMgr2, SysmoUSIMgr1, SysmoUSIMSJS1,
 		   FairwavesSIM, OpenCellsSim, WavemobileSim, SysmoISIMSJA2 ]
 
-def card_autodetect(scc):
-	for kls in _cards_classes:
-		card = kls.autodetect(scc)
-		if card is not None:
-			card.reset()
-			return card
-	return None
-
 def card_detect(ctype, scc):
 	# Detect type if needed
 	card = None
 	ctypes = dict([(kls.name, kls) for kls in _cards_classes])
 
-	if ctype in ("auto", "auto_once"):
+	if ctype == "auto":
 		for kls in _cards_classes:
 			card = kls.autodetect(scc)
 			if card:
@@ -1566,9 +1575,6 @@ def card_detect(ctype, scc):
 		if card is None:
 			print("Autodetection failed")
 			return None
-
-		if ctype == "auto_once":
-			ctype = card.name
 
 	elif ctype in ctypes:
 		card = ctypes[ctype](scc)
